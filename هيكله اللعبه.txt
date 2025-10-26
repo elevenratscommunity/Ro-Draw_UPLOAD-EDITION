@@ -1,0 +1,34 @@
+/src
+├── /components         // المكونات الصغيرة اللي بتتكرر
+│   ├── /screens        // الشاشات الرئيسية اللي أنت ذكرتها
+│   │   ├── HomeScreen.js
+│   │   ├── MainMenuScreen.js
+│   │   ├── LobbyScreen.js
+│   │   ├── GameScreen.js      <-- (ده هيفضل كبير بس هيتقسم تاني)
+│   │   ├── ProfileScreen.js
+│   │   ├── StoreScreen.js
+│   │   ├── FriendsScreen.js
+│   │   ├── LeaderboardScreen.js
+│   │   └── CreateRoomScreen.js
+│   │
+│   ├── /game           // مكونات شاشة اللعبة نفسها
+│   │   ├── Canvas.js
+│   │   ├── ChatBox.js
+│   │   ├── PlayerList.js
+│   │   └── Toolbar.js
+│   │
+│   └── /ui             // مكونات واجهة مستخدم عامة
+│       ├── Modal.js
+│       ├── Notification.js
+│       └── Avatar.js
+│
+├── /contexts           // الفولدر الأهم لإدارة الداتا المشتركة
+│   ├── AuthContext.js    // هيشيل بيانات اليوزر اللي مسجل
+│   ├── FirebaseContext.js // هيوفر الـ (db) والـ (auth) لكل حتة
+│   ├── UIContext.js      // للتحكم في النوتفكيشن والمودال
+│
+├── /data               // ملفات الداتا الثابتة
+│   ├── constants.js      (هنا نحط WORD_LISTS و STORE_ITEMS)
+│
+├── App.js              // الملف الرئيسي الجديد (هيبقى صغير جداً)
+└── index.js

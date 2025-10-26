@@ -1,0 +1,594 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, signInAnonymously, signOut, updateProfile } from 'firebase/auth';
+import { getFirestore, doc, onSnapshot, collection, addDoc, getDoc, updateDoc, serverTimestamp, arrayUnion, setDoc } from 'firebase/firestore';
+import { X, Circle, MessageSquare, Copy, Play, LogIn, Cpu, LogOut, User, Edit, Save, ArrowLeft, Crown } from 'lucide-react';
+
+// --- تهيئة Firebase ---
+// تم تحديث هذا الجزء بناءً على طلبك
+const firebaseConfig = {
+  apiKey: "AIzaSyA8HZ5l5M7uykAtp5EwI7ZOsAgZLKRKI4Y",
+  authDomain: "tictacchatgame.firebaseapp.com",
+  projectId: "tictacchatgame",
+  storageBucket: "tictacchatgame.appspot.com",
+  messagingSenderId: "263686905233",
+  appId: "1:263686905233:web:4b40eea4267cd7f5d24e30",
+  measurementId: "G-D814L90YJX"
+};
+
+const appId = firebaseConfig.appId; // استخدام معرف التطبيق من الإعدادات
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// --- مكونات مساعدة ---
+
+const Icon = ({ name, ...props }) => {
+  const IconMap = {
+    x: X, circle: Circle, message: MessageSquare, copy: Copy, play: Play, login: LogIn, 
+    cpu: Cpu, logout: LogOut, user: User, edit: Edit, save: Save, arrowLeft: ArrowLeft, crown: Crown
+  };
+  const SpecificIcon = IconMap[name];
+  return SpecificIcon ? <SpecificIcon {...props} /> : null;
+};
+
+const LoadingSpinner = () => (
+    <div className="flex justify-center items-center h-full w-full">
+        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-500"></div>
+    </div>
+);
+
+const Modal = ({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-70 z-50 flex justify-center items-center p-4" onClick={onClose}>
+            <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-gray-700" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-2xl font-bold text-white">{title}</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors text-3xl leading-none">&times;</button>
+                </div>
+                {children}
+            </div>
+        </div>
+    );
+};
+
+// --- مكونات اللعبة الأساسية ---
+
+const Square = ({ value, onClick, isWinning }) => {
+  const symbol = value === 'X' ? <Icon name="x" className="w-12 h-12 text-rose-500" /> :
+                 value === 'O' ? <Icon name="circle" className="w-12 h-12 text-sky-400" /> : null;
+  const winningClass = isWinning ? 'bg-emerald-500/30 scale-110' : 'bg-gray-800 hover:bg-gray-700';
+  return (
+    <button
+      onClick={onClick}
+      className={`w-24 h-24 md:w-28 md:h-28 flex items-center justify-center rounded-lg shadow-lg transition-all duration-300 transform ${winningClass}`}
+    >
+      {symbol}
+    </button>
+  );
+};
+
+const Board = ({ squares, onClick, winningLine }) => (
+  <div className="grid grid-cols-3 gap-3 p-3 bg-gray-900/50 rounded-xl shadow-inner">
+    {squares.map((square, i) => (
+      <Square key={i} value={square} onClick={() => onClick(i)} isWinning={winningLine && winningLine.includes(i)} />
+    ))}
+  </div>
+);
+
+const Chat = ({ messages, onSendMessage, userId, playersInfo }) => {
+  const [newMessage, setNewMessage] = useState('');
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = (e) => {
+    e.preventDefault();
+    if (newMessage.trim()) {
+      onSendMessage(newMessage);
+      setNewMessage('');
+    }
+  };
+
+  const getSenderName = (senderId) => {
+      if (senderId === userId) return 'أنا';
+      return playersInfo[senderId]?.displayName || 'لاعب آخر';
+  }
+
+  return (
+    <div className="w-full max-w-md lg:max-w-sm h-[30rem] flex flex-col bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg p-4 border border-gray-700">
+      <h3 className="text-xl font-bold mb-4 text-center text-white flex items-center justify-center gap-2"><Icon name="message" /> الدردشة الحية</h3>
+      <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+        {messages.map((msg, index) => (
+          <div key={index} className={`flex items-end gap-2 ${msg.senderId === userId ? 'justify-end' : 'justify-start'}`}>
+            {msg.senderId !== userId && <img src={playersInfo[msg.senderId]?.photoURL || `https://placehold.co/40x40/7c3aed/ffffff?text=${getSenderName(msg.senderId).charAt(0)}`} alt="avatar" className="w-8 h-8 rounded-full" />}
+            <div className={`max-w-xs px-4 py-2 rounded-2xl ${msg.senderId === userId ? 'bg-purple-600 text-white rounded-br-none' : 'bg-gray-700 text-gray-200 rounded-bl-none'}`}>
+              <p className="text-sm font-bold">{getSenderName(msg.senderId)}</p>
+              <p className="break-words">{msg.text}</p>
+            </div>
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+      <form onSubmit={handleSend} className="mt-4 flex gap-2">
+        <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="اكتب رسالتك..." className="flex-1 p-2 rounded-lg border-2 border-gray-600 bg-gray-700 text-white focus:outline-none focus:border-purple-500" />
+        <button type="submit" className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">إرسال</button>
+      </form>
+    </div>
+  );
+};
+
+
+// --- شاشات التطبيق ---
+
+const ProfileScreen = ({ user, onBack, onUpdateProfile }) => {
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [newDisplayName, setNewDisplayName] = useState(user.displayName || '');
+
+    const handleSave = () => {
+        onUpdateProfile(newDisplayName);
+        setIsEditModalOpen(false);
+    };
+
+    return (
+        <div className="w-full max-w-2xl mx-auto p-6">
+            <button onClick={onBack} className="flex items-center gap-2 text-purple-400 hover:text-purple-300 mb-6 font-bold transition-colors">
+                <Icon name="arrowLeft" /> العودة للردهة
+            </button>
+            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl shadow-2xl p-8 text-center border border-gray-700">
+                <img src={user.photoURL || `https://placehold.co/128x128/1f2937/ffffff?text=${(user.displayName || 'U').charAt(0)}`} alt="Profile" className="w-32 h-32 rounded-full mx-auto mb-4 border-4 border-purple-500" />
+                <h2 className="text-3xl font-bold text-white">{user.displayName}</h2>
+                <p className="text-gray-400 mb-6">{user.email}</p>
+                <button onClick={() => setIsEditModalOpen(true)} className="bg-emerald-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg hover:bg-emerald-600 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 mx-auto">
+                    <Icon name="edit" /> تعديل اسم العرض
+                </button>
+            </div>
+
+            <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="تعديل الملف الشخصي">
+                <div className="space-y-4">
+                    <label htmlFor="displayName" className="block text-gray-300">اسم العرض الجديد</label>
+                    <input id="displayName" type="text" value={newDisplayName} onChange={(e) => setNewDisplayName(e.target.value)} className="w-full p-3 rounded-lg border-2 border-gray-600 bg-gray-700 text-white focus:outline-none focus:border-purple-500" />
+                    <button onClick={handleSave} className="w-full bg-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
+                        <Icon name="save" /> حفظ التغييرات
+                    </button>
+                </div>
+            </Modal>
+        </div>
+    );
+};
+
+// --- المكون الرئيسي ---
+export default function App() {
+    const [user, setUser] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [currentScreen, setCurrentScreen] = useState('loading'); // loading, lobby, profile, game
+    const [gameConfig, setGameConfig] = useState(null);
+
+    // مصادقة المستخدم وتحديث بياناته
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            if (currentUser) {
+                const userDocRef = doc(db, `artifacts/${appId}/public/data/users`, currentUser.uid);
+                let userDocSnap = await getDoc(userDocRef);
+                
+                if (!userDocSnap.exists()) {
+                    await setDoc(userDocRef, {
+                        displayName: `لاعب-${currentUser.uid.slice(0, 5)}`,
+                        email: currentUser.email || 'غير متوفر',
+                        photoURL: currentUser.photoURL || '',
+                        uid: currentUser.uid,
+                    });
+                    userDocSnap = await getDoc(userDocRef);
+                }
+                
+                const userData = userDocSnap.data();
+                const combinedUser = { 
+                    ...currentUser, 
+                    displayName: userData.displayName, 
+                    photoURL: userData.photoURL 
+                };
+
+                setUser(combinedUser);
+                setCurrentScreen('lobby');
+                setIsLoading(false);
+            } else {
+                try {
+                    await signInAnonymously(auth);
+                } catch (error) {
+                    console.error("خطأ في تسجيل الدخول التلقائي:", error);
+                    setIsLoading(false);
+                }
+            }
+        });
+        return () => unsubscribe();
+    }, []);
+
+    const handleLogout = async () => {
+        await signOut(auth);
+        setUser(null);
+        setCurrentScreen('loading');
+        setIsLoading(true);
+    };
+
+    const handleUpdateProfile = async (newDisplayName) => {
+        if (auth.currentUser && newDisplayName.trim()) {
+            try {
+                const userDocRef = doc(db, `artifacts/${appId}/public/data/users`, auth.currentUser.uid);
+                await updateDoc(userDocRef, { displayName: newDisplayName });
+                await updateProfile(auth.currentUser, { displayName: newDisplayName });
+                setUser(prevUser => ({ ...prevUser, displayName: newDisplayName }));
+            } catch (error) {
+                console.error("خطأ في تحديث الملف الشخصي:", error);
+            }
+        }
+    };
+    
+    const handleStartGame = (config) => {
+        setGameConfig(config);
+        setCurrentScreen('game');
+    };
+
+    const renderContent = () => {
+        if (isLoading || !user) {
+            return <div className="flex flex-col items-center justify-center h-full"><LoadingSpinner /><p className="mt-4 text-lg">جاري الاتصال...</p></div>;
+        }
+        switch (currentScreen) {
+            case 'lobby':
+                return <LobbyScreen user={user} onNavigate={setCurrentScreen} onStartGame={handleStartGame} onLogout={handleLogout} />;
+            case 'profile':
+                return <ProfileScreen user={user} onBack={() => setCurrentScreen('lobby')} onUpdateProfile={handleUpdateProfile} />;
+            case 'game':
+                return <GameScreen user={user} config={gameConfig} onBack={() => { setGameConfig(null); setCurrentScreen('lobby'); }} />;
+            default:
+                return <div className="flex flex-col items-center justify-center h-full"><LoadingSpinner /><p className="mt-4 text-lg">جاري التحميل...</p></div>;
+        }
+    };
+
+    return (
+        <main className="bg-gray-900 text-gray-100 min-h-screen w-full flex items-center justify-center p-4 font-sans bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
+            <div className="w-full h-full">
+                {renderContent()}
+            </div>
+        </main>
+    );
+}
+
+// --- شاشة الردهة ---
+const LobbyScreen = ({ user, onNavigate, onStartGame, onLogout }) => {
+    const [roomId, setRoomId] = useState('');
+    const [isJoining, setIsJoining] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleCreateRoom = async () => {
+        try {
+            const newRoomRef = await addDoc(collection(db, `artifacts/${appId}/public/data/tic-tac-chat-rooms`), {
+                board: Array(9).fill(null),
+                players: { 'X': user.uid },
+                currentPlayer: 'X',
+                status: 'waiting',
+                winner: null,
+                createdAt: serverTimestamp(),
+                messages: [],
+            });
+            onStartGame({ mode: 'multiplayer', id: newRoomRef.id });
+        } catch (err) {
+            console.error("خطأ في إنشاء الغرفة:", err);
+            setError('فشل في إنشاء غرفة. حاول مرة أخرى.');
+        }
+    };
+
+    const handleJoinRoom = async (e) => {
+        e.preventDefault();
+        if (!roomId.trim()) return;
+        setIsJoining(true);
+        setError('');
+        const roomRef = doc(db, `artifacts/${appId}/public/data/tic-tac-chat-rooms`, roomId.trim());
+        const roomSnap = await getDoc(roomRef);
+        if (roomSnap.exists()) {
+            onStartGame({ mode: 'multiplayer', id: roomId.trim() });
+        } else {
+            setError('الغرفة غير موجودة. تأكد من الرمز.');
+        }
+        setIsJoining(false);
+    };
+
+    return (
+        <div className="w-full max-w-md mx-auto">
+            <header className="flex justify-between items-center mb-8">
+                <div className="flex items-center gap-3">
+                    <img src={user.photoURL || `https://placehold.co/48x48/7c3aed/ffffff?text=${(user.displayName || 'U').charAt(0)}`} alt="avatar" className="w-12 h-12 rounded-full border-2 border-purple-400" />
+                    <div>
+                        <p className="text-lg font-bold text-white">{user.displayName}</p>
+                        <button onClick={() => onNavigate('profile')} className="text-sm text-purple-400 hover:underline">عرض الملف الشخصي</button>
+                    </div>
+                </div>
+                <button onClick={onLogout} className="bg-gray-700 hover:bg-red-600 text-white font-bold p-3 rounded-full transition-colors"><Icon name="logout" /></button>
+            </header>
+
+            <div className="space-y-4 text-center bg-gray-800/50 backdrop-blur-sm p-8 rounded-2xl border border-gray-700">
+                <h1 className="text-4xl font-bold text-white mb-6">اختر طور اللعب</h1>
+                <button onClick={() => onStartGame({ mode: 'singleplayer' })} className="w-full bg-teal-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-teal-600 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"><Icon name="cpu" /> اللعب ضد الكمبيوتر</button>
+                <button onClick={handleCreateRoom} className="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-indigo-700 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"><Icon name="play" /> إنشاء غرفة جديدة (أونلاين)</button>
+                <div className="flex items-center"><hr className="flex-grow border-t border-gray-600" /><span className="px-4 text-gray-400">أو</span><hr className="flex-grow border-t border-gray-600" /></div>
+                <form onSubmit={handleJoinRoom} className="flex gap-2">
+                    <input type="text" placeholder="أدخل رمز الغرفة" value={roomId} onChange={(e) => setRoomId(e.target.value)} className="flex-1 p-3 rounded-lg border-2 border-gray-600 bg-gray-700 text-white focus:outline-none focus:border-indigo-500" />
+                    <button type="submit" disabled={isJoining} className="bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-emerald-600 transition-all duration-300 flex items-center justify-center"><Icon name="login" /></button>
+                </form>
+                {error && <p className="text-red-500 mt-4">{error}</p>}
+            </div>
+        </div>
+    );
+};
+
+// --- شاشة اللعب ---
+const GameScreen = ({ user, config, onBack }) => {
+    // Multiplayer State
+    const [game, setGame] = useState(null);
+    const [playersInfo, setPlayersInfo] = useState({});
+    // Single Player State
+    const [singlePlayerGame, setSinglePlayerGame] = useState(null);
+    // Common State
+    const [error, setError] = useState('');
+    const [copied, setCopied] = useState(false);
+
+    // --- منطق حساب الفائز ---
+    const calculateWinner = (squares) => {
+        const lines = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+        for (let i = 0; i < lines.length; i++) {
+            const [a, b, c] = lines[i];
+            if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
+                return { winner: squares[a], line: lines[i] };
+            }
+        }
+        return null;
+    };
+
+    // --- تأثيرات اللعب الجماعي ---
+    useEffect(() => {
+        if (config.mode !== 'multiplayer' || !config.id) return;
+        const gameRef = doc(db, `artifacts/${appId}/public/data/tic-tac-chat-rooms`, config.id);
+
+        const joinGame = async () => {
+            try {
+                const gameSnap = await getDoc(gameRef);
+                if (gameSnap.exists()) {
+                    const gameData = gameSnap.data();
+                    if (Object.keys(gameData.players).length < 2 && !Object.values(gameData.players).includes(user.uid)) {
+                        await updateDoc(gameRef, { 'players.O': user.uid, status: 'playing' });
+                    }
+                } else {
+                    setError('الغرفة غير موجودة.');
+                }
+            } catch (err) {
+                console.error("Error joining game:", err);
+                setError("فشل الانضمام للغرفة.");
+            }
+        };
+        joinGame();
+
+        const unsubscribe = onSnapshot(gameRef, (docSnapshot) => {
+            if (docSnapshot.exists()) {
+                const gameData = { id: docSnapshot.id, ...docSnapshot.data() };
+                setGame(gameData);
+                Object.values(gameData.players).forEach(async (playerId) => {
+                    if (!playersInfo[playerId]) {
+                        const userDocRef = doc(db, `artifacts/${appId}/public/data/users`, playerId);
+                        const userDocSnap = await getDoc(userDocRef);
+                        if (userDocSnap.exists()) {
+                            setPlayersInfo(prev => ({ ...prev, [playerId]: userDocSnap.data() }));
+                        }
+                    }
+                });
+            } else {
+                setError('تم حذف الغرفة.');
+                onBack();
+            }
+        }, (err) => {
+            console.error("Snapshot error:", err);
+            setError("فقد الاتصال بالغرفة.");
+        });
+        return () => unsubscribe();
+    }, [config.id, config.mode, user.uid]);
+
+    // --- تأثيرات اللعب الفردي والذكاء الاصطناعي ---
+    useEffect(() => {
+        if (config.mode === 'singleplayer' && !singlePlayerGame) {
+            setSinglePlayerGame({ board: Array(9).fill(null), currentPlayer: 'X', status: 'playing', winner: null });
+        }
+    }, [config.mode, singlePlayerGame]);
+
+    useEffect(() => {
+        if (config.mode === 'singleplayer' && singlePlayerGame?.currentPlayer === 'O' && singlePlayerGame.status === 'playing') {
+            const timer = setTimeout(() => {
+                const board = singlePlayerGame.board;
+                let bestMove = -1;
+                const availableMoves = board.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
+                
+                if (availableMoves.length > 0) {
+                    // 1. Win if possible
+                    for (let i of availableMoves) {
+                        const tempBoard = [...board]; tempBoard[i] = 'O';
+                        if (calculateWinner(tempBoard)?.winner === 'O') { bestMove = i; break; }
+                    }
+                    // 2. Block if necessary
+                    if (bestMove === -1) {
+                        for (let i of availableMoves) {
+                            const tempBoard = [...board]; tempBoard[i] = 'X';
+                            if (calculateWinner(tempBoard)?.winner === 'X') { bestMove = i; break; }
+                        }
+                    }
+                    // 3. Simple strategy
+                    if (bestMove === -1) {
+                        const centerAndCorners = [4, 0, 2, 6, 8];
+                        const strategicMoves = centerAndCorners.filter(i => availableMoves.includes(i));
+                        if(strategicMoves.length > 0) bestMove = strategicMoves[0];
+                        else bestMove = availableMoves[Math.floor(Math.random() * availableMoves.length)];
+                    }
+                }
+
+                if (bestMove !== -1) {
+                    const newBoard = [...board];
+                    newBoard[bestMove] = 'O';
+                    const winnerInfo = calculateWinner(newBoard);
+                    const newStatus = winnerInfo ? 'finished' : newBoard.every(s => s) ? 'finished' : 'playing';
+                    
+                    setSinglePlayerGame({
+                        board: newBoard,
+                        currentPlayer: newStatus === 'playing' ? 'X' : 'O',
+                        status: newStatus,
+                        winner: winnerInfo?.winner || (newStatus === 'finished' ? 'Draw' : null),
+                    });
+                }
+            }, 600);
+            return () => clearTimeout(timer);
+        }
+    }, [singlePlayerGame, config.mode]);
+
+    // --- دوال التحكم باللعبة ---
+    const handleMove = (index) => {
+        if (config.mode === 'multiplayer') {
+            handleMultiplayerMove(index);
+        } else {
+            handleSinglePlayerMove(index);
+        }
+    };
+
+    const handleMultiplayerMove = async (index) => {
+        if (!game) return;
+        const { board, currentPlayer, players, status } = game;
+        const playerSymbol = Object.keys(players).find(key => players[key] === user.uid);
+        if (status !== 'playing' || board[index] || currentPlayer !== playerSymbol) return;
+
+        const newBoard = [...board]; newBoard[index] = currentPlayer;
+        const winnerInfo = calculateWinner(newBoard);
+        const newStatus = winnerInfo ? 'finished' : newBoard.every(s => s) ? 'finished' : 'playing';
+        
+        await updateDoc(doc(db, `artifacts/${appId}/public/data/tic-tac-chat-rooms`, game.id), {
+            board: newBoard,
+            currentPlayer: newStatus === 'playing' ? (currentPlayer === 'X' ? 'O' : 'X') : currentPlayer,
+            status: newStatus,
+            winner: winnerInfo?.winner || (newStatus === 'finished' ? 'Draw' : null),
+        });
+    };
+
+    const handleSinglePlayerMove = (index) => {
+        if (!singlePlayerGame) return;
+        const { board, currentPlayer, status } = singlePlayerGame;
+        if (status !== 'playing' || board[index] || currentPlayer !== 'X') return;
+
+        const newBoard = [...board]; newBoard[index] = 'X';
+        const winnerInfo = calculateWinner(newBoard);
+        const newStatus = winnerInfo ? 'finished' : newBoard.every(s => s) ? 'finished' : 'playing';
+        
+        setSinglePlayerGame({
+            ...singlePlayerGame,
+            board: newBoard,
+            currentPlayer: newStatus === 'playing' ? 'O' : 'X',
+            status: newStatus,
+            winner: winnerInfo?.winner || (newStatus === 'finished' ? 'Draw' : null),
+        });
+    };
+
+    const handleResetGame = async () => {
+        if (config.mode === 'multiplayer' && game) {
+            await updateDoc(doc(db, `artifacts/${appId}/public/data/tic-tac-chat-rooms`, game.id), {
+                board: Array(9).fill(null), currentPlayer: 'X', status: 'playing', winner: null
+            });
+        } else {
+            setSinglePlayerGame({ board: Array(9).fill(null), currentPlayer: 'X', status: 'playing', winner: null });
+        }
+    };
+
+    const handleSendMessage = async (text) => {
+        if (config.mode === 'multiplayer' && game) {
+            await updateDoc(doc(db, `artifacts/${appId}/public/data/tic-tac-chat-rooms`, game.id), {
+                messages: arrayUnion({ senderId: user.uid, text, timestamp: new Date() })
+            });
+        }
+    };
+
+    const copyRoomId = () => {
+        const textArea = document.createElement('textarea');
+        textArea.value = game.id;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) { console.error('فشل النسخ', err); }
+        document.body.removeChild(textArea);
+    };
+
+    // --- عرض الواجهة ---
+    const gameState = config.mode === 'multiplayer' ? game : singlePlayerGame;
+    if (!gameState) return <div className="w-full h-full flex flex-col justify-center items-center"><LoadingSpinner /><p className="mt-4 text-lg">جاري تحميل اللعبة...</p></div>;
+
+    const winnerInfo = calculateWinner(gameState.board);
+    const playerSymbol = config.mode === 'multiplayer' ? Object.keys(gameState.players || {}).find(key => gameState.players[key] === user.uid) : 'X';
+    let statusMessage;
+
+    if (gameState.status === 'waiting') {
+        statusMessage = "في انتظار لاعب آخر...";
+    } else if (gameState.status === 'finished') {
+        if (gameState.winner === 'Draw') statusMessage = "انتهت اللعبة بالتعادل!";
+        else if (gameState.winner === playerSymbol) statusMessage = "🎉 تهانينا، لقد فزت!";
+        else statusMessage = "خسرت. حظ أوفر في المرة القادمة!";
+    } else {
+        if (config.mode === 'singleplayer') {
+            statusMessage = gameState.currentPlayer === 'X' ? "دورك الآن للعب" : "الكمبيوتر يفكر...";
+        } else {
+            statusMessage = gameState.currentPlayer === playerSymbol ? "دورك الآن للعب" : "في انتظار حركة الخصم...";
+        }
+    }
+    
+    const getPlayerName = (symbol) => {
+        if (config.mode === 'singleplayer') return symbol === 'X' ? user.displayName : 'الكمبيوتر';
+        const playerId = gameState.players[symbol];
+        return playersInfo[playerId]?.displayName || `لاعب ${symbol}...`;
+    }
+
+    return (
+      <div className="w-full max-w-7xl mx-auto p-4">
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-3xl font-bold">{config.mode === 'multiplayer' ? 'غرفة اللعب (أونلاين)' : 'لعبة ضد الكمبيوتر'}</h2>
+            <button onClick={onBack} className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2"><Icon name="arrowLeft" /> العودة</button>
+        </div>
+
+        {config.mode === 'multiplayer' && gameState.status === 'waiting' && (
+            <div className="bg-purple-900/50 border border-purple-700 p-4 rounded-lg mb-4 flex items-center justify-between flex-wrap gap-2">
+                <div><p className="font-bold">شارك رمز الغرفة للانضمام:</p><p className="font-mono text-lg break-all">{gameState.id}</p></div>
+                <button onClick={copyRoomId} className="bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 flex items-center gap-2"><Icon name="copy" />{copied ? 'تم النسخ!' : 'نسخ'}</button>
+            </div>
+        )}
+
+        <div className="flex flex-col lg:flex-row gap-8 justify-center">
+          <div className="flex flex-col items-center gap-6">
+            <div className="flex justify-around w-full max-w-md text-center p-2 bg-gray-800/50 rounded-xl border border-gray-700">
+                <div className={`p-4 rounded-lg w-1/2 transition-all ${gameState.currentPlayer === 'X' ? 'bg-rose-500/20' : ''}`}>
+                    <p className="text-lg font-bold flex items-center justify-center gap-2"><Icon name="x" className="w-6 h-6 text-rose-500" /> {getPlayerName('X')}</p>
+                </div>
+                <div className={`p-4 rounded-lg w-1/2 transition-all ${gameState.currentPlayer === 'O' ? 'bg-sky-400/20' : ''}`}>
+                    <p className="text-lg font-bold flex items-center justify-center gap-2"><Icon name="circle" className="w-6 h-6 text-sky-400" /> {getPlayerName('O')}</p>
+                </div>
+            </div>
+            
+            <Board squares={gameState.board} onClick={handleMove} winningLine={winnerInfo?.line} />
+
+            <div className="text-center h-16">
+                <p className="text-xl font-semibold mb-4 min-h-[2rem]">{statusMessage}</p>
+                {gameState.status === 'finished' && (
+                    <button onClick={handleResetGame} className="bg-green-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-600 transition-colors">إعادة اللعب</button>
+                )}
+            </div>
+          </div>
+          
+          {config.mode === 'multiplayer' && <Chat messages={gameState.messages || []} onSendMessage={handleSendMessage} userId={user.uid} playersInfo={playersInfo} />}
+        </div>
+      </div>
+    );
+};
